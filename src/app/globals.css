@@ -1,0 +1,76 @@
+@import "tailwindcss";
+
+/* =========================================================
+   DESIGN TOKENS — Simples Apuração RTC
+   Paleta: Profissional, limpa, voltada para análise de dados
+   ========================================================= */
+
+:root {
+  /* Cores primárias */
+  --color-primary: #1e40af;        /* Azul institucional */
+  --color-primary-light: #3b82f6;
+  --color-primary-dark: #1e3a8a;
+
+  /* Cores semânticas — tributos */
+  --color-credit: #16a34a;         /* Verde — crédito IBS/CBS */
+  --color-credit-light: #dcfce7;
+  --color-debit: #dc2626;          /* Vermelho — débito IBS/CBS */
+  --color-debit-light: #fee2e2;
+  --color-neutral: #6b7280;        /* Cinza — neutro/não tributado */
+  --color-neutral-light: #f3f4f6;
+
+  /* Cores de status */
+  --color-valid: #16a34a;
+  --color-warning: #d97706;
+  --color-error: #dc2626;
+  --color-info: #2563eb;
+
+  /* Superfícies */
+  --color-surface: #ffffff;
+  --color-surface-secondary: #f8fafc;
+  --color-border: #e2e8f0;
+
+  /* Tipografia */
+  --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
+  --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+
+  /* Layout */
+  --sidebar-width: 256px;
+  --header-height: 64px;
+}
+
+/* Base */
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+
+html {
+  font-family: var(--font-sans);
+  font-size: 16px;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  background-color: var(--color-surface-secondary);
+  color: #1e293b;
+  margin: 0;
+}
+
+/* Scrollbar customizada — discreta */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--color-border); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+
+/* Fontes monetárias e chaves de acesso em monospace */
+.font-mono { font-family: var(--font-mono); }
+
+/* Utilitários semânticos RTC */
+.rtc-credit { color: var(--color-credit); }
+.rtc-debit  { color: var(--color-debit); }
+.rtc-neutral { color: var(--color-neutral); }
+
+.badge-credit  { background: var(--color-credit-light); color: var(--color-credit); }
+.badge-debit   { background: var(--color-debit-light); color: var(--color-debit); }
+.badge-neutral { background: var(--color-neutral-light); color: var(--color-neutral); }
