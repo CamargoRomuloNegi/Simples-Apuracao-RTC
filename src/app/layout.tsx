@@ -1,9 +1,7 @@
 /**
  * @file layout.tsx
- * @description Layout raiz da aplicação Next.js (App Router).
- * Define estrutura visual: Sidebar fixa + Header + conteúdo principal.
+ * @description Root layout — Sidebar + Header fixos + área de conteúdo scrollável.
  */
-
 import type { Metadata } from 'next'
 import './globals.css'
 import { Sidebar } from '@/components/layout/Sidebar'
@@ -12,21 +10,18 @@ import { Header } from '@/components/layout/Header'
 export const metadata: Metadata = {
   title: 'Simples Apuração RTC',
   description: 'Apuração assistida de IBS/CBS — Reforma Tributária do Consumo',
-  robots: 'noindex, nofollow', // Aplicação de uso interno — não indexar
+  robots: 'noindex, nofollow',
 }
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="pt-BR">
       <body>
-        <div className="flex h-screen overflow-hidden">
-          {/* Sidebar fixa à esquerda */}
+        <div style={{ display: 'flex', height: '100vh', overflow: 'hidden' }}>
           <Sidebar />
-
-          {/* Área principal */}
-          <div className="flex flex-col flex-1 overflow-hidden">
+          <div style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden', minWidth: 0 }}>
             <Header />
-            <main className="flex-1 overflow-auto p-6">
+            <main style={{ flex: 1, overflowY: 'auto', padding: '24px' }}>
               {children}
             </main>
           </div>

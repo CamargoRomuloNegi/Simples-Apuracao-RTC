@@ -1,48 +1,91 @@
 /**
  * @file Header.tsx
- * @description Cabeçalho superior da aplicação.
- * Sprint 3: Integrar contador de documentos e CNPJ analisado do store.
+ * @description Cabeçalho com contador de documentos, CNPJ analisado, exportação e botão de limpar sessão.
  */
-
 'use client'
 
-import { Building2, Trash2 } from 'lucide-react'
+import { Trash2, Download, Building2 } from 'lucide-react'
+import { useFiscalStore }  from '@/application/store/useFiscalStore'
+import { exportToExcel }   from '@/application/services/ExportService'
+import { formatCnpjCpf }   from '@/lib/utils'
+import { Button }          from '@/components/ui/Button'
+import { useState }        from 'react'
 
 export function Header() {
-  // Sprint 3: conectar ao useFiscalStore
-  // const { documents, analyzedCnpjRoot, clearAll } = useFiscalStore()
+  const documents = useFiscalStore(s => s.documents)
+  const cnpjRoot  = useFiscalStore(s => s.analyzedCnpjRoot)
+  const clearAll  = useFiscalStore(s => s.clearAll)
+  const [exporting, setExporting] = useState(false)
+
+  const handleExport = async () => {
+    if (documents.length === 0) return
+    setExporting(true)
+    try { await exportToExcel(documents) }
+    finally { setExporting(false) }
+  }
+
+  const handleClear = () => {
+    if (documents.length === 0) return
+    if (window.confirm(`Limpar ${documents.length} documento(s) da sessão? Esta ação não pode ser desfeita.`)) {
+      clearAll()
+    }
+  }
 
   return (
-    <header
-      className="flex items-center justify-between px-6 bg-white border-b border-slate-200 shrink-0"
-      style={{ height: 'var(--header-height)' }}
-    >
+    <header style={{
+      display:'flex',alignItems:'center',justifyContent:'space-between',
+      padding:'0 20px',height:'var(--header-height)',
+      background:'var(--color-surface)',borderBottom:'1px solid var(--color-border)',
+      flexShrink:0,gap:'12px',
+    }}>
+
       {/* Empresa analisada */}
-      <div className="flex items-center gap-2 text-sm text-slate-600">
-        <Building2 size={16} className="text-slate-400" />
-        <span className="text-slate-400">Empresa analisada:</span>
-        <span className="font-medium text-slate-700">
-          {/* Sprint 3: exibir CNPJ formatado ou "Não detectado" */}
-          Não detectado
-        </span>
+      <div style={{ display:'flex',alignItems:'center',gap:'8px',flex:1,minWidth:0 }}>
+        <Building2 size={15} style={{ color:'var(--color-text-muted)',flexShrink:0 }} />
+        <span style={{ fontSize:'0.8rem',color:'var(--color-text-muted)',flexShrink:0 }}>Empresa:</span>
+        {cnpjRoot ? (
+          <span style={{ fontFamily:'var(--font-data)',fontSize:'0.82rem',fontWeight:600,color:'var(--color-primary)',background:'var(--color-primary-light)',padding:'2px 8px',borderRadius:'4px' }}>
+            CNPJ raiz {cnpjRoot}
+          </span>
+        ) : (
+          <span style={{ fontSize:'0.8rem',color:'var(--color-text-muted)',fontStyle:'italic' }}>
+            {documents.length > 0 ? 'Detectando…' : 'Aguardando upload'}
+          </span>
+        )}
       </div>
 
       {/* Ações */}
-      <div className="flex items-center gap-3">
-        {/* Contador de documentos — Sprint 3 */}
-        <span className="text-xs text-slate-400 bg-slate-100 px-2.5 py-1 rounded-full">
-          0 documentos
-        </span>
+      <div style={{ display:'flex',alignItems:'center',gap:'8px',flexShrink:0 }}>
 
-        {/* Botão limpar sessão */}
-        <button
-          className="flex items-center gap-1.5 text-xs text-slate-500 hover:text-red-600 hover:bg-red-50 px-3 py-1.5 rounded-lg transition-colors"
-          title="Limpar todos os documentos da sessão"
-          onClick={() => {/* Sprint 3: clearAll() */}}
+        {/* Contador */}
+        {documents.length > 0 && (
+          <span style={{ fontSize:'0.78rem',color:'var(--color-text-muted)',background:'var(--color-bg)',border:'1px solid var(--color-border)',borderRadius:'20px',padding:'2px 10px',fontFamily:'var(--font-data)' }}>
+            {documents.length} doc{documents.length !== 1 ? 's' : ''}
+          </span>
+        )}
+
+        {/* Exportar Excel */}
+        <Button
+          variant="primary"
+          size="sm"
+          icon={<Download size={13} />}
+          loading={exporting}
+          disabled={documents.length === 0}
+          onClick={handleExport}
         >
-          <Trash2 size={14} />
-          Limpar sessão
-        </button>
+          Exportar Excel
+        </Button>
+
+        {/* Limpar sessão */}
+        <Button
+          variant="danger"
+          size="sm"
+          icon={<Trash2 size={13} />}
+          disabled={documents.length === 0}
+          onClick={handleClear}
+        >
+          Limpar
+        </Button>
       </div>
     </header>
   )

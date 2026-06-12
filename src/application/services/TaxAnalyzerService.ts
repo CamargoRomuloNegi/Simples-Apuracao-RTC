@@ -1,150 +1,260 @@
 /**
  * @file TaxAnalyzerService.ts
- * @description Serviço de enriquecimento e análise tributária.
+ * @description Serviço de enriquecimento e apuração tributária.
  *
- * STATUS: Skeleton (Sprint 0) — interfaces e contratos definidos.
- * Implementação completa: Sprint 2.
+ * REGRA CENTRAL (docs/SPEC_BUSINESS_RULES.md — Seção 3 e 4):
+ *   O driver de CRÉDITO/DÉBITO é a DIREÇÃO (INBOUND/OUTBOUND).
+ *   O CFOP serve APENAS para filtrar operações não-comerciais (→ NEUTRAL).
  *
  * RESPONSABILIDADES:
- * 1. Detectar o CNPJ raiz da empresa analisada (por frequência no lote)
- * 2. Enriquecer documentos com direction (INBOUND/OUTBOUND)
- * 3. Enriquecer itens com rtc_impact (CREDIT/DEBIT/NEUTRAL)
- * 4. Calcular sumário de apuração (créditos, débitos, saldo)
- *
- * REGRA CENTRAL:
- * O driver de crédito/débito é a DIREÇÃO (INBOUND/OUTBOUND).
- * O CFOP serve APENAS para filtrar operações não-comerciais (→ NEUTRAL).
- * Ver: docs/SPEC_BUSINESS_RULES.md — Seção 3 e 4.
+ *   1. detectMainCnpjRoot  — detecta o CNPJ raiz da empresa analisada por frequência
+ *   2. enrichDocument      — classifica direction + rtc_impact por item
+ *   3. determineRtcImpact  — aplica a regra crédito/débito/neutro
+ *   4. calculateApuracao   — consolida KPIs do período
  */
 
 import type {
-  FiscalDocument,
-  DocumentDirection,
-  RtcImpact,
+  FiscalDocument, DocumentItem, DocumentDirection, RtcImpact,
 } from '@/domain/models/FiscalDocument'
+import { extractCnpjRoot } from '@/lib/utils'
 
 // ---------------------------------------------------------------------------
 // TIPOS DE SAÍDA
 // ---------------------------------------------------------------------------
 
-/** Sumário consolidado da apuração IBS/CBS de um lote de documentos */
 export interface ApuracaoSummary {
-  /** Total de créditos de IBS/CBS (entradas com destaque) */
-  totalCreditos: number
-  /** Total de débitos de IBS/CBS (saídas tributadas) */
-  totalDebitos: number
-  /** Saldo = créditos - débitos (positivo = credor, negativo = devedor) */
-  saldo: number
-  /** Quantidade de documentos com IBS/CBS destacado */
-  docsComIBSCBS: number
-  /** Quantidade de documentos sem IBS/CBS (potencial inconformidade) */
-  docsSemIBSCBS: number
-  /** Quantidade de documentos de emitentes Simples Nacional (sem crédito) */
-  docsSimples: number
+  totalCreditos:   number
+  totalDebitos:    number
+  saldo:           number
+  docsComIBSCBS:   number
+  docsSemIBSCBS:   number
+  docsSimples:     number
+  totalDocumentos: number
 }
 
-/** Resultado da detecção automática de CNPJ raiz */
 export interface CnpjRootDetectionResult {
-  /** CNPJ raiz detectado (8 dígitos) — null se não detectado */
-  cnpjRoot: string | null
-  /** Frequência de aparição do CNPJ raiz detectado */
-  frequency: number
-  /** Total de documentos analisados */
+  cnpjRoot:       string | null
+  frequency:      number
   totalDocuments: number
 }
 
 // ---------------------------------------------------------------------------
-// CFOP NÃO-COMERCIAIS (filtro de exclusão da análise de conformidade)
+// CFOPs NÃO-COMERCIAIS — geram NEUTRAL independente da direção
+// (docs/SPEC_BUSINESS_RULES.md — Seção 5.3)
 // ---------------------------------------------------------------------------
 
 /**
- * Prefixos de CFOP que representam operações não-comerciais.
- * Documentos com esses CFOPs recebem rtc_impact = NEUTRAL automaticamente,
- * independente da direção.
- *
- * Fonte: SPEC_BUSINESS_RULES.md — Seção 5.3
+ * Prefixos de 4 caracteres (XCXX) que identificam operações não-comerciais.
+ * A verificação usa startsWith sobre o CFOP com ponto removido.
  */
-const NON_COMMERCIAL_CFOP_PREFIXES = [
-  '5.91', '6.91', // Remessas para consignação
-  '5.92', '6.92', // Retorno de consignação
-  '5.93', '6.93', // Remessa para industrialização por conta de terceiros
-  '5.94', '6.94', // Retorno de industrialização
-  '5.91', '6.91', // Remessa para conserto/reparo
-  '5.90', '6.90', // Outras remessas
-  '5.99', '6.99', // Outras saídas não especificadas
-  '7.',           // Exportações (imunes)
-] as const
+const NON_COMMERCIAL_PREFIXES = new Set([
+  '5910', '6910', // Remessa p/ bonificação/brinde/amostra
+  '5911', '6911', // Remessa p/ demonstração
+  '5912', '6912', // Remessa p/ demonstração em processo armazenagem
+  '5913', '6913', // Remessa p/ industrialização por conta de terceiros
+  '5914', '6914', // Remessa p/ cobertura de vendas
+  '5915', '6915', // Remessa p/ zona franca/área de livre comércio (remessa)
+  '5916', '6916', // Retorno de mercadoria por conta de terceiros
+  '5917', '6917', // Remessa de mercadoria por conta e ordem de terceiros
+  '5918', '6918', // Remessa p/ venda fora do estabelecimento
+  '5919', '6919', // Retorno de mercadoria não entregue
+  '5920', '6920', // Remessa p/ conserto ou reparo
+  '5921', '6921', // Retorno de conserto/reparo
+  '5922', '6922', // Lançamento por ressarcimento
+  '5923', '6923', // Remessa de vasilhame/sacaria
+  '5924', '6924', // Retorno de vasilhame/sacaria
+  '5925', '6925', // Remessa de talão
+  '5949', '6949', // Outras saídas não especificadas
+  '5999', '6999', // Outras saídas
+  '7101', '7102', '7105', '7107', '7110', '7201', '7202', // Exportações (imunes)
+  '7210', '7211', '7212', '7501', '7502', '7503', '7504',
+  '7505', '7553', '7649', '7667', '7930', '7949',
+])
 
 // ---------------------------------------------------------------------------
-// FUNÇÕES EXPORTADAS
+// 1. DETECÇÃO DO CNPJ RAIZ
 // ---------------------------------------------------------------------------
 
 /**
  * Detecta automaticamente o CNPJ raiz da empresa analisada.
- * Conta frequência de CNPJs raiz entre emitentes e destinatários.
- * O CNPJ raiz com maior frequência é a empresa analisada.
- *
- * @param documents - Lista de documentos processados
+ * Conta aparições de cada CNPJ raiz (8 dígitos) nos campos issuer e receiver.
+ * O CNPJ raiz com maior contagem é a empresa analisada.
  */
 export function detectMainCnpjRoot(documents: FiscalDocument[]): CnpjRootDetectionResult {
-  // TODO Sprint 2: Implementar
-  // 1. Para cada documento, extrair CNPJ raiz de issuer.cnpj_cpf e receiver.cnpj_cpf
-  // 2. CNPJ raiz = primeiros 8 dígitos (CNPJ) ou CPF completo (PF)
-  // 3. Contar ocorrências de cada raiz
-  // 4. Retornar a raiz com maior contagem
-  return { cnpjRoot: null, frequency: 0, totalDocuments: documents.length }
+  const freq = new Map<string, number>()
+
+  for (const doc of documents) {
+    const roots = [
+      extractCnpjRoot(doc.issuer.cnpj_cpf),
+      extractCnpjRoot(doc.receiver.cnpj_cpf),
+      doc.sender ? extractCnpjRoot(doc.sender.cnpj_cpf) : null,
+    ].filter((r): r is string => r !== null && r.length >= 8)
+
+    for (const root of roots) {
+      freq.set(root, (freq.get(root) ?? 0) + 1)
+    }
+  }
+
+  if (freq.size === 0) {
+    return { cnpjRoot: null, frequency: 0, totalDocuments: documents.length }
+  }
+
+  const [cnpjRoot, frequency] = [...freq.entries()].reduce(
+    (best, curr) => curr[1] > best[1] ? curr : best
+  )
+
+  return { cnpjRoot, frequency, totalDocuments: documents.length }
 }
+
+// ---------------------------------------------------------------------------
+// 2. ENRIQUECIMENTO DO DOCUMENTO
+// ---------------------------------------------------------------------------
 
 /**
  * Enriquece um documento com direction e rtc_impact por item.
  * Operação imutável — retorna novo objeto sem modificar o original.
- *
- * @param document    - Documento a enriquecer
- * @param cnpjRoot    - CNPJ raiz da empresa analisada
  */
-export function enrichDocument(document: FiscalDocument, cnpjRoot: string): FiscalDocument {
-  // TODO Sprint 2: Implementar
-  // 1. Comparar cnpjRoot com issuer.cnpj_cpf e receiver.cnpj_cpf
-  // 2. Determinar direction (INBOUND/OUTBOUND/UNKNOWN)
-  // 3. Para cada item, chamar enrichItem(item, direction)
-  // 4. Retornar novo FiscalDocument com direction e items enriquecidos
-  return document
+export function enrichDocument(doc: FiscalDocument, cnpjRoot: string): FiscalDocument {
+  const direction = detectDirection(doc, cnpjRoot)
+
+  const items = doc.items.map((item) => ({
+    ...item,
+    rtc_impact: determineRtcImpact(item.cfop, direction),
+  }))
+
+  return { ...doc, direction, items }
 }
 
 /**
- * Enriquece um item com rtc_impact.
- * Regra: DIRECTION é o driver; CFOP apenas filtra operações não-comerciais.
+ * Detecta a direção do documento em relação à empresa analisada.
+ */
+function detectDirection(doc: FiscalDocument, cnpjRoot: string): DocumentDirection {
+  const issuerRoot   = extractCnpjRoot(doc.issuer.cnpj_cpf)
+  const receiverRoot = extractCnpjRoot(doc.receiver.cnpj_cpf)
+
+  if (issuerRoot   === cnpjRoot) return 'OUTBOUND'
+  if (receiverRoot === cnpjRoot) return 'INBOUND'
+  return 'UNKNOWN'
+}
+
+// ---------------------------------------------------------------------------
+// 3. IMPACTO RTC POR ITEM
+// ---------------------------------------------------------------------------
+
+/**
+ * Determina o impacto RTC (CREDIT/DEBIT/NEUTRAL) de um item.
  *
- * @param cfop      - CFOP do item (para filtro de exclusão)
- * @param direction - Direção inferida do documento
+ * Regra:
+ *   1. CFOP não-comercial → NEUTRAL
+ *   2. INBOUND  → CREDIT  (empresa está recebendo → se credita)
+ *   3. OUTBOUND → DEBIT   (empresa está emitindo → gera débito)
+ *   4. UNKNOWN  → NEUTRAL
  */
 export function determineRtcImpact(cfop: string, direction: DocumentDirection): RtcImpact {
-  // TODO Sprint 2: Implementar
-  // 1. Se CFOP está em NON_COMMERCIAL_CFOP_PREFIXES → NEUTRAL
-  // 2. Se direction === INBOUND → CREDIT
-  // 3. Se direction === OUTBOUND → DEBIT
-  // 4. Se direction === UNKNOWN → NEUTRAL
+  if (direction === 'UNKNOWN') return 'NEUTRAL'
+
+  // Normalizar CFOP: remover ponto e pegar 4 dígitos
+  const normalized = cfop.replace('.', '').slice(0, 4)
+  if (NON_COMMERCIAL_PREFIXES.has(normalized)) return 'NEUTRAL'
+
+  if (direction === 'INBOUND')  return 'CREDIT'
+  if (direction === 'OUTBOUND') return 'DEBIT'
   return 'NEUTRAL'
 }
 
+// ---------------------------------------------------------------------------
+// 4. CÁLCULO DA APURAÇÃO
+// ---------------------------------------------------------------------------
+
 /**
- * Calcula o sumário consolidado de apuração IBS/CBS.
- *
- * @param documents - Lista de documentos enriquecidos
+ * Calcula o sumário consolidado de apuração IBS/CBS de um lote de documentos.
+ * Considera apenas documentos já enriquecidos (com direction definida).
  */
 export function calculateApuracao(documents: FiscalDocument[]): ApuracaoSummary {
-  // TODO Sprint 2: Implementar
-  // 1. Somar vIBS + vCBS de itens com rtc_impact === CREDIT → totalCreditos
-  // 2. Somar vIBS + vCBS de itens com rtc_impact === DEBIT → totalDebitos
-  // 3. saldo = totalCreditos - totalDebitos
-  // 4. Contadores de conformidade
+  let totalCreditos = 0
+  let totalDebitos  = 0
+  let docsComIBSCBS = 0
+  let docsSemIBSCBS = 0
+  let docsSimples   = 0
+
+  for (const doc of documents) {
+    const docVIBS = doc.totals.vIBS ?? 0
+    const docVCBS = doc.totals.vCBS ?? 0
+    const hasIBSCBS = (docVIBS + docVCBS) > 0
+
+    if (doc.tax_regime === 'SIMPLES_NACIONAL' || doc.tax_regime === 'MEI') {
+      docsSimples++
+    } else if (hasIBSCBS) {
+      docsComIBSCBS++
+    } else {
+      docsSemIBSCBS++
+    }
+
+    for (const item of doc.items) {
+      const vIBS = item.rtc.vIBS ?? 0
+      const vCBS = item.rtc.vCBS ?? 0
+      const total = vIBS + vCBS
+
+      if (total === 0) continue
+
+      if (item.rtc_impact === 'CREDIT') totalCreditos += total
+      if (item.rtc_impact === 'DEBIT')  totalDebitos  += total
+    }
+  }
 
   return {
-    totalCreditos: 0,
-    totalDebitos: 0,
-    saldo: 0,
-    docsComIBSCBS: 0,
-    docsSemIBSCBS: 0,
-    docsSimples: 0,
+    totalCreditos:   round2(totalCreditos),
+    totalDebitos:    round2(totalDebitos),
+    saldo:           round2(totalCreditos - totalDebitos),
+    docsComIBSCBS,
+    docsSemIBSCBS,
+    docsSimples,
+    totalDocumentos: documents.length,
   }
+}
+
+// ---------------------------------------------------------------------------
+// UTILITÁRIOS INTERNOS
+// ---------------------------------------------------------------------------
+
+/** Arredonda para 2 casas decimais evitando erros de ponto flutuante */
+function round2(value: number): number {
+  return Math.round(value * 100) / 100
+}
+
+/**
+ * Filtra documentos inconformes:
+ * RPA + operação comercial + sem IBS/CBS + emitido após 2026-01-01
+ */
+export function getInconformes(documents: FiscalDocument[]): FiscalDocument[] {
+  return documents.filter((doc) => {
+    if (doc.tax_regime !== 'RPA') return false
+    if (doc.direction !== 'INBOUND') return false
+
+    const issueYear = new Date(doc.issue_date).getFullYear()
+    if (issueYear < 2026) return false
+
+    const vIBS = doc.totals.vIBS ?? 0
+    const vCBS = doc.totals.vCBS ?? 0
+    return (vIBS + vCBS) === 0
+  })
+}
+
+/**
+ * Agrupa documentos por CNPJ do emitente para ranking de fornecedores.
+ */
+export function groupByCnpjEmitente(
+  documents: FiscalDocument[]
+): Map<string, { name: string; docs: FiscalDocument[] }> {
+  const map = new Map<string, { name: string; docs: FiscalDocument[] }>()
+
+  for (const doc of documents) {
+    const key = doc.issuer.cnpj_cpf
+    if (!map.has(key)) {
+      map.set(key, { name: doc.issuer.name, docs: [] })
+    }
+    map.get(key)!.docs.push(doc)
+  }
+
+  return map
 }
