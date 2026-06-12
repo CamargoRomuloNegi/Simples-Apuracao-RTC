@@ -14,7 +14,7 @@
  */
 
 import type {
-  FiscalDocument, DocumentItem, DocumentDirection, RtcImpact,
+  FiscalDocument, DocumentDirection, RtcImpact,
 } from '@/domain/models/FiscalDocument'
 import { extractCnpjRoot } from '@/lib/utils'
 

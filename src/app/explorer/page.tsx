@@ -9,7 +9,7 @@ import { Search, SlidersHorizontal, ChevronUp, ChevronDown } from 'lucide-react'
 import { useFiscalStore }         from '@/application/store/useFiscalStore'
 import { DocumentDetailsModal }   from '@/components/explorer/DocumentDetailsModal'
 import { EmptyState }             from '@/components/ui/EmptyState'
-import { docTypeBadge, directionBadge, regimeBadge, rtcImpactBadge } from '@/components/ui/Badge'
+import { docTypeBadge, directionBadge, regimeBadge } from '@/components/ui/Badge'
 import { formatBRL, formatCnpjCpf, truncate } from '@/lib/utils'
 import type { FiscalDocument, DocumentType, DocumentDirection, TaxRegime } from '@/domain/models/FiscalDocument'
 

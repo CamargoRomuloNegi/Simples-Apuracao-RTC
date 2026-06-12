@@ -25,7 +25,7 @@ import { detectDocumentType } from '@/infrastructure/parsers/DocumentDetector'
 import { parseDocument }       from '@/infrastructure/parsers/ParserFactory'
 import { useFiscalStore }      from '@/application/store/useFiscalStore'
 import { detectMainCnpjRoot }  from '@/application/services/TaxAnalyzerService'
-import { formatCnpjCpf }       from '@/lib/utils'
+
 import { Button }              from '@/components/ui/Button'
 
 // ---------------------------------------------------------------------------

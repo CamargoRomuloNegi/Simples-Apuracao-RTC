@@ -7,7 +7,7 @@
 import { Trash2, Download, Building2 } from 'lucide-react'
 import { useFiscalStore }  from '@/application/store/useFiscalStore'
 import { exportToExcel }   from '@/application/services/ExportService'
-import { formatCnpjCpf }   from '@/lib/utils'
+
 import { Button }          from '@/components/ui/Button'
 import { useState }        from 'react'
 

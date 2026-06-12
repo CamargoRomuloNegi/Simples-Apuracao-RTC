@@ -137,7 +137,7 @@ function Pax({ label,p }:{ label:string;p:{cnpj_cpf:string;name:string;ie?:strin
   )
 }
 
-function ItemRow({ item,docType }:{ item:DocumentItem;docType:string }) {
+function ItemRow({ item,docType:_docType }:{ item:DocumentItem;docType:string }) {
   const hasRTC = (item.rtc.vIBS??0)+(item.rtc.vCBS??0)>0
   return (
     <div style={{ padding:'12px 14px',borderBottom:'1px solid var(--color-border)' }}>
