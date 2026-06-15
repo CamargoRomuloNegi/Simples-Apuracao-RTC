@@ -20,69 +20,99 @@ import { GEMINI_MODELS }              from '@/domain/models/AiTypes'
 import type { GeminiModel }           from '@/domain/models/AiTypes'
 
 // ---------------------------------------------------------------------------
-// PROMPT DO DOSSIÊ — estrutura fixa e profissional
+// PROMPT DO DOSSIÊ — estrutura baseada na abordagem de alta qualidade
 // ---------------------------------------------------------------------------
+//
+// DESIGN: dados formatados como texto legível (não JSON) + papel bem definido
+// para a IA + seções explícitas com instruções de conteúdo + restrições claras.
+// Essa combinação produz dossiês técnicos de qualidade profissional.
 
 function buildReportPrompt(context: AiContext): string {
-  return `Você é um consultor tributário sênior especializado na Reforma Tributária do Consumo brasileira (IBS e CBS, LC 214/2025).
+  const brl = (v: number) =>
+    v.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 
-Com base exclusivamente nos dados abaixo, elabore um **DOSSIÊ TRIBUTÁRIO COMPLETO** em Markdown. Seja técnico, objetivo e profissional. Use os valores exatos fornecidos.
+  const byType = context.byDocType
+    .map(t =>
+      `  - ${t.tipo}: ${t.count} documentos | Crédito IBS/CBS: R$ ${brl(t.credito)} | Débito IBS/CBS: R$ ${brl(t.debito)}`
+    )
+    .join('\n')
 
-## DADOS DA APURAÇÃO
-${JSON.stringify(context, null, 2)}
+  const cfops = context.topCfops
+    .map((cfop, i) =>
+      `  ${i + 1}. CFOP ${cfop.cfop} — Crédito: R$ ${brl(cfop.credito)} | Débito: R$ ${brl(cfop.debito)}`
+    )
+    .join('\n')
+
+  const temporal = context.temporal
+    .map(t =>
+      `  - ${t.label}: Crédito R$ ${brl(t.credito)} | Débito R$ ${brl(t.debito)} | Saldo R$ ${brl(t.saldo)}`
+    )
+    .join('\n')
+
+  const posicao  = context.ibscbs.saldo >= 0 ? 'CREDORA' : 'DEVEDORA'
+  const saldoAbs = Math.abs(context.ibscbs.saldo)
+
+  const dados = [
+    `Período analisado: ${context.period}`,
+    `Total de documentos: ${context.totalDocs.toLocaleString('pt-BR')}`,
+    `Volume de entradas: R$ ${brl(context.volumes.inbound)}`,
+    `Volume de saídas:   R$ ${brl(context.volumes.outbound)}`,
+    `Volume total:       R$ ${brl(context.volumes.total)}`,
+    '',
+    `Crédito IBS/CBS: R$ ${brl(context.ibscbs.credito)} (${context.ibscbs.creditRate.toFixed(2)}% das entradas)`,
+    `Débito IBS/CBS:  R$ ${brl(context.ibscbs.debito)} (${context.ibscbs.debitRate.toFixed(2)}% das saídas)`,
+    `Saldo líquido:   R$ ${brl(saldoAbs)} — Posição ${posicao} (${Math.abs(context.ibscbs.balanceRate).toFixed(2)}% das saídas)`,
+    '',
+    'Regime tributário dos emitentes:',
+    `  - Regime Normal (RPA): ${context.byRegime.rpa} documentos`,
+    `  - Simples Nacional: ${context.byRegime.simples} documentos`,
+    `  - MEI: ${context.byRegime.mei} documentos`,
+    `  - Documentos RPA sem IBS/CBS em 2026 (inconformes): ${context.inconformes}`,
+    '',
+    'Por tipo de documento:',
+    byType,
+    '',
+    'Top CFOPs por volume de IBS/CBS:',
+    cfops,
+    '',
+    'Evolução mensal:',
+    temporal,
+  ].join('\n')
+
+  const secoes = [
+    '1. **Sumário Executivo** — panorama do período, posição credora/devedora, volume de operações e principal diagnóstico.',
+    '2. **Posição RTC** — tabela de créditos, débitos e saldo com análise dos índices percentuais e sua interpretação fiscal. Referencie o cronograma de transição da LC 214/2025.',
+    '3. **Conformidade** — qualidade da carteira de fornecedores, risco de créditos perdidos (classifique: alto/médio/baixo) e impacto financeiro estimado.',
+    '4. **Por Tipo de Documento** — tabela com participação percentual de cada espécie (NF-e, CT-e etc.) e IBS/CBS gerado por tipo.',
+    '5. **Por CFOP** — análise dos principais CFOPs: natureza da operação, se é fonte de crédito ou débito e atenção especial a regimes diferenciados.',
+    '6. **Evolução Temporal** — médias mensais de documentos, faturamento e IBS/CBS; tendência e regularidade do período.',
+    '7. **Recomendações** — ações prioritárias (Alta/Média/Baixa) com impacto financeiro estimado e prazo de execução.',
+    '8. **Conclusão** — diagnóstico consolidado e perspectiva fiscal estratégica para os próximos períodos.',
+  ].join('\n')
+
+  return `Atue como contador especialista, tributarista experiente e conhecedor profundo dos impactos da Reforma Tributária do Consumo (RTC) — IBS e CBS instituídos pela LC 214/2025.
+
+Com base exclusivamente nos dados estatísticos a seguir, elabore um DOSSIÊ TÉCNICO TRIBUTÁRIO completo e profissional nas seções abaixo:
+
+${secoes}
 
 ---
 
-## ESTRUTURA OBRIGATÓRIA DO DOSSIÊ
+DADOS ESTATÍSTICOS BASE (use apenas estes — não extrapole nem invente):
 
-# Dossiê de Apuração IBS/CBS
-**Período:** ${context.period} | **Documentos analisados:** ${context.totalDocs.toLocaleString('pt-BR')}
-
-## 1. Sumário Executivo
-Apresente em 3 parágrafos: (a) posição geral credora ou devedora com os valores reais, (b) o que essa posição significa operacionalmente para a empresa, (c) o principal ponto de atenção do período.
-
-## 2. Análise da Posição RTC
-Analise em detalhes:
-- Total de créditos IBS/CBS e o índice percentual sobre as entradas
-- Total de débitos IBS/CBS e o índice percentual sobre as saídas
-- Saldo do período (posição credora ou devedora) e o índice sobre as saídas
-- Interpretação prática: o que esses índices revelam sobre a carga tributária efetiva
-
-## 3. Conformidade da Carteira de Fornecedores
-- Quantidade de documentos de fornecedores RPA sem IBS/CBS destacado
-- Impacto financeiro estimado (créditos não aproveitados)
-- Classificação do risco (alto/médio/baixo) com justificativa
-- Recomendações de ação para regularização
-
-## 4. Distribuição por Tipo de Documento
-Para cada tipo presente (NF-e, NFC-e, CT-e, NFS-e):
-- Quantidade e participação no volume total
-- Crédito e débito de IBS/CBS gerado
-- Observações relevantes
-
-## 5. Concentração por CFOP
-- Top CFOPs com maior impacto em IBS/CBS
-- Análise se a concentração representa risco ou oportunidade
-- CFOPs que geram débito vs CFOPs que geram crédito
-
-## 6. Análise Temporal e Tendência
-Com base na evolução mensal:
-- Meses com melhor e pior saldo
-- Tendência identificada (melhora, piora, estável)
-- Sazonalidade ou padrão observado nos dados
-
-## 7. Pontos de Atenção e Recomendações
-Liste em ordem de prioridade (Alta/Média/Baixa):
-- Riscos identificados com impacto financeiro estimado
-- Oportunidades de otimização tributária
-- Ações recomendadas com prazo sugerido
-
-## 8. Conclusão
-Parágrafo final com o diagnóstico consolidado e a perspectiva para os próximos períodos.
+${dados}
 
 ---
-REGRAS: Use apenas dados do contexto. Cite valores em R$ com 2 casas decimais e percentuais com 2 casas decimais. Não invente informações.`
+
+INSTRUÇÕES DE FORMATAÇÃO E TOM:
+- Markdown com tabelas (use | col | col |), negrito, listas hierárquicas e subtítulos ## para cada seção
+- Valores monetários em padrão brasileiro: R$ 1.234,56
+- Percentuais com 2 casas decimais
+- Tom técnico e assertivo, adequado para diretores e contadores
+- Não exiba cálculos intermediários nem equações — apresente resultados e interpretações
+- Não cite dados além do fornecido neste prompt`
 }
+
 
 // ---------------------------------------------------------------------------
 // VERIFICAÇÃO DE ORIGEM
