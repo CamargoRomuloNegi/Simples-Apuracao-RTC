@@ -16,6 +16,8 @@
   "dependencies": {
     "@fontsource/ibm-plex-mono": "^5.2.7",
     "@fontsource/outfit": "^5.2.8",
+    "@supabase/ssr": "^0.12.0",
+    "@supabase/supabase-js": "^2.108.2",
     "clsx": "^2.1.1",
     "fast-xml-parser": "^5.2.5",
     "jszip": "^3.10.1",
