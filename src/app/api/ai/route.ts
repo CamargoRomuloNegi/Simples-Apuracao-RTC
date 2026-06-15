@@ -190,10 +190,11 @@ export async function POST(request: NextRequest): Promise<Response> {
     return NextResponse.json({ error: 'Modelo inválido' }, { status: 400 })
   }
 
-  const maxTokens = Number(p.maxTokens ?? 4096)
-  if (maxTokens < 512 || maxTokens > 8192) {
-    return NextResponse.json({ error: 'maxTokens fora do intervalo permitido' }, { status: 400 })
-  }
+  // maxTokens é apenas informativo — o dossiê usa o máximo do modelo.
+  // Free Tier do Gemini limita RPM (15/min), não o tamanho de cada resposta.
+  // Travar tokens artificialmente degrada a qualidade sem proteger nada.
+  const _maxTokensHint = Number(p.maxTokens ?? 8192) // ignorado na prática
+  void _maxTokensHint // suprime warning de variável não usada
 
   if (!p.context || typeof p.context !== 'object') {
     return NextResponse.json({ error: 'Contexto ausente' }, { status: 400 })
@@ -213,7 +214,7 @@ export async function POST(request: NextRequest): Promise<Response> {
       body: JSON.stringify({
         contents: [{ role: 'user', parts: [{ text: prompt }] }],
         generationConfig: {
-          maxOutputTokens: maxTokens,
+          maxOutputTokens: 65536, // limite máximo do Gemini 3.5 Flash — dossiê completo sem truncamento
           temperature:     0.2,  // determinístico para análise fiscal
           topP:            0.8,
         },

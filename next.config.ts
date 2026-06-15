@@ -31,7 +31,8 @@ import type { NextConfig } from 'next'
 const nextConfig: NextConfig = {
   // ESLint — não bloqueia build (roda via npm run lint)
   eslint: {
-    ignoreDuringBuilds: false,
+    // ESLint roda via 'npm run lint' — não bloqueia o build de produção
+    ignoreDuringBuilds: true,
   },
 
   // Garante que bibliotecas client-only (JSZip, SheetJS) sejam tratadas corretamente

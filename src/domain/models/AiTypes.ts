@@ -148,6 +148,11 @@ export interface AiTurn {
 export interface AiSettings {
   model:     GeminiModel
   maxTokens: number
+  /** Logo da empresa em base64 (data URL) — exibida no cabeçalho do dossiê exportado.
+   *  Armazenada em localStorage como preferência visual, sem dados fiscais. */
+  companyLogo?: string
+  /** Nome da empresa para exibição no cabeçalho do dossiê */
+  companyName?: string
 }
 
 // ---------------------------------------------------------------------------
