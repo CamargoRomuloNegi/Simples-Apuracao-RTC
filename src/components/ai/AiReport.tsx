@@ -7,6 +7,7 @@
 
 import { useRef }      from 'react'
 import ReactMarkdown   from 'react-markdown'
+import remarkGfm       from 'remark-gfm'
 import { Download, Printer, RefreshCw } from 'lucide-react'
 import type { AiContext } from '@/domain/models/AiTypes'
 
@@ -66,7 +67,7 @@ export function AiReport({ markdown, context, isLoading, streamText: _stream, co
 
       <div ref={reportRef} style={{ background:'var(--color-surface)', border:'1px solid var(--color-border)', borderRadius:'var(--radius-lg)', padding:'32px 36px' }}>
         <div className="ai-markdown">
-          <ReactMarkdown>{display}</ReactMarkdown>
+          <ReactMarkdown remarkPlugins={[remarkGfm]}>{display}</ReactMarkdown>
         </div>
         {isLoading && (
           <span style={{ display:'inline-block', width:'8px', height:'16px', background:'var(--color-primary)', marginLeft:'2px', animation:'blink 0.8s steps(2) infinite' }} />

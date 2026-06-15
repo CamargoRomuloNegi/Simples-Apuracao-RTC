@@ -20,12 +20,19 @@ import { GEMINI_MODELS }              from '@/domain/models/AiTypes'
 import type { GeminiModel }           from '@/domain/models/AiTypes'
 
 // ---------------------------------------------------------------------------
-// PROMPT DO DOSSIÊ — estrutura baseada na abordagem de alta qualidade
+// PROMPT DO DOSSIÊ v4 — análise adaptada ao regime da empresa
 // ---------------------------------------------------------------------------
 //
-// DESIGN: dados formatados como texto legível (não JSON) + papel bem definido
-// para a IA + seções explícitas com instruções de conteúdo + restrições claras.
-// Essa combinação produz dossiês técnicos de qualidade profissional.
+// INOVAÇÃO: o prompt identifica o regime da empresa analisada e adapta
+// a análise à matriz:
+//
+//  Regime    | Compras          | Vendas | Análise prioritária
+//  ──────────┼──────────────────┼────────┼──────────────────────────────────
+//  RPA       | qualquer         | B2B/B2C| Crédito/débito pleno
+//  Simples   | com créditos     | B2C    | Vale a pena mudar de regime?
+//  Simples   | com créditos     | B2B    | Risco competitivo — migrar ou não?
+//  Simples   | neutro (simples) | B2C    | Sem créditos e sem impacto B2C
+//  Simples   | neutro           | B2B    | Atenção ao posicionamento de preço
 
 function buildReportPrompt(context: AiContext): string {
   const brl = (v: number) =>
@@ -52,6 +59,77 @@ function buildReportPrompt(context: AiContext): string {
   const posicao  = context.ibscbs.saldo >= 0 ? 'CREDORA' : 'DEVEDORA'
   const saldoAbs = Math.abs(context.ibscbs.saldo)
 
+  // Análise de regime para o prompt
+  const regime = context.companyRegime
+  const pp     = context.purchaseProfile
+  const sp     = context.salesProfile
+
+  const perfilCompras = pp.creditCoverageRate >= 60
+    ? `COM CRÉDITOS (${pp.creditCoverageRate.toFixed(1)}% do valor das compras tem IBS/CBS de fornecedores RPA)`
+    : pp.creditCoverageRate >= 20
+    ? `MISTO (${pp.creditCoverageRate.toFixed(1)}% das compras com IBS/CBS — ${pp.neutral} docs de Simples/MEI sem crédito)`
+    : `PREDOMINANTEMENTE NEUTRO (apenas ${pp.creditCoverageRate.toFixed(1)}% das compras geram crédito — maioria de fornecedores Simples/MEI)`
+
+  const perfilVendas = sp.b2bRate >= 70
+    ? `PREDOMINANTEMENTE B2B (${sp.b2bRate.toFixed(1)}% para CNPJs — clientes empresas)`
+    : sp.b2bRate >= 30
+    ? `MISTO (${sp.b2bRate.toFixed(1)}% B2B para CNPJs / ${(100 - sp.b2bRate).toFixed(1)}% B2C para CPFs/consumidores)`
+    : `PREDOMINANTEMENTE B2C (${(100 - sp.b2bRate).toFixed(1)}% consumidor final — CPF ou anônimo)`
+
+  // Instrução específica para o regime detectado
+  let regimeInstruction = ''
+
+  if (regime === 'RPA') {
+    regimeInstruction = `
+## INSTRUÇÃO ESPECIAL — REGIME NORMAL (RPA)
+A empresa é tributada pelo Regime Normal (RPA). Realize análise PLENA de créditos e débitos:
+- Calcule e interprete o saldo credor/devedor com precisão
+- Avalie a eficiência da não-cumulatividade (créditos capturados vs. potencial)
+- Identifique CFOPs e tipos de documento com maior impacto
+- Recomende ações para maximização de créditos e gestão dos débitos`
+  } else if (regime === 'SIMPLES_NACIONAL' || regime === 'MEI') {
+    const isB2B = sp.b2bRate >= 50
+    const hasCredits = pp.creditCoverageRate >= 30
+
+    if (hasCredits && isB2B) {
+      regimeInstruction = `
+## INSTRUÇÃO ESPECIAL — SIMPLES NACIONAL com COMPRAS CREDENCIADAS e VENDAS B2B ⚠️ ANÁLISE CRÍTICA
+Este é o cenário de MAIOR ATENÇÃO sob a Reforma Tributária:
+- A empresa compra de fornecedores RPA que destacam IBS/CBS (${pp.creditCoverageRate.toFixed(1)}% do valor das compras)
+- MAS vende predominantemente para empresas (${sp.b2bRate.toFixed(1)}% B2B), que QUEREM TOMAR CRÉDITO dos fornecedores
+- Permanecendo no Simples Nacional, NÃO destaca IBS/CBS nas saídas → clientes B2B perdem crédito → RISCO COMPETITIVO ALTO
+
+OBRIGATÓRIO analisar:
+1. O valor do IBS/CBS que os clientes B2B DEIXAM DE APROVEITAR por comprar de fornecedor Simples
+2. Se a migração para Regime Normal ou regime híbrido (Dual) seria financeiramente vantajosa
+3. A comparação entre a carga tributária atual no Simples vs. a carga no RPA com aproveitamento pleno
+4. O impacto na competitividade de preço vs. concorrentes RPA que permitem crédito ao cliente`
+    } else if (hasCredits && !isB2B) {
+      regimeInstruction = `
+## INSTRUÇÃO ESPECIAL — SIMPLES NACIONAL com COMPRAS CREDENCIADAS e VENDAS B2C
+A empresa compra com IBS/CBS disponível (${pp.creditCoverageRate.toFixed(1)}% das compras de RPA) mas vende predominantemente ao consumidor final (${(100 - sp.b2bRate).toFixed(1)}% B2C):
+- O consumidor final NÃO toma créditos de IBS/CBS → o destacamento não agrega valor ao cliente
+- A migração de regime pode NÃO ser vantajosa neste perfil
+- Porém, avalie o custo do IBS/CBS embutido nas compras vs. a economia tributária do Simples
+
+ANALISAR:
+1. O IBS/CBS pago nas compras (embutido no custo) vs. a vantagem da alíquota reduzida do Simples
+2. Se a empresa tem margem para absorver o imposto nas compras sem migrar
+3. Projeção comparativa: Simples atual vs. RPA com créditos plenos`
+    } else {
+      regimeInstruction = `
+## INSTRUÇÃO ESPECIAL — SIMPLES NACIONAL com FORNECEDORES PREDOMINANTEMENTE SIMPLES
+A empresa compra majoritariamente de fornecedores Simples/MEI (${pp.neutral} docs sem IBS/CBS — apenas ${pp.creditCoverageRate.toFixed(1)}% das compras com crédito):
+- Cadeia predominantemente Simples: baixo impacto imediato da RTC
+- Vendas ${perfilVendas.toLowerCase()}
+
+ANALISAR:
+1. O perfil da cadeia de fornecimento e se há tendência de migração dos fornecedores para RPA
+2. O risco futuro conforme alíquotas de transição aumentam (2027-2033)
+3. Recomendações de monitoramento e planejamento preventivo`
+    }
+  }
+
   const dados = [
     `Período analisado: ${context.period}`,
     `Total de documentos: ${context.totalDocs.toLocaleString('pt-BR')}`,
@@ -63,11 +141,19 @@ function buildReportPrompt(context: AiContext): string {
     `Débito IBS/CBS:  R$ ${brl(context.ibscbs.debito)} (${context.ibscbs.debitRate.toFixed(2)}% das saídas)`,
     `Saldo líquido:   R$ ${brl(saldoAbs)} — Posição ${posicao} (${Math.abs(context.ibscbs.balanceRate).toFixed(2)}% das saídas)`,
     '',
-    'Regime tributário dos emitentes:',
-    `  - Regime Normal (RPA): ${context.byRegime.rpa} documentos`,
-    `  - Simples Nacional: ${context.byRegime.simples} documentos`,
-    `  - MEI: ${context.byRegime.mei} documentos`,
-    `  - Documentos RPA sem IBS/CBS em 2026 (inconformes): ${context.inconformes}`,
+    `REGIME DA EMPRESA ANALISADA: ${regime}`,
+    `Perfil de Compras: ${perfilCompras}`,
+    `  - Fornecedores RPA com IBS/CBS: ${pp.withCredits} docs`,
+    `  - Fornecedores Simples/MEI sem IBS/CBS: ${pp.neutral} docs`,
+    `Perfil de Vendas: ${perfilVendas}`,
+    `  - Vendas B2B (para CNPJs/empresas): ${sp.b2b} docs`,
+    `  - Vendas B2C (para CPFs/consumidor): ${sp.b2c} docs`,
+    '',
+    `Regime tributário dos fornecedores (INBOUND):`,
+    `  - RPA: ${context.byRegime.rpa} docs`,
+    `  - Simples Nacional: ${context.byRegime.simples} docs`,
+    `  - MEI: ${context.byRegime.mei} docs`,
+    `  - Docs RPA sem IBS/CBS em 2026 (inconformes): ${context.inconformes}`,
     '',
     'Por tipo de documento:',
     byType,
@@ -80,20 +166,24 @@ function buildReportPrompt(context: AiContext): string {
   ].join('\n')
 
   const secoes = [
-    '1. **Sumário Executivo** — panorama do período, posição credora/devedora, volume de operações e principal diagnóstico.',
-    '2. **Posição RTC** — tabela de créditos, débitos e saldo com análise dos índices percentuais e sua interpretação fiscal. Referencie o cronograma de transição da LC 214/2025.',
-    '3. **Conformidade** — qualidade da carteira de fornecedores, risco de créditos perdidos (classifique: alto/médio/baixo) e impacto financeiro estimado.',
-    '4. **Por Tipo de Documento** — tabela com participação percentual de cada espécie (NF-e, CT-e etc.) e IBS/CBS gerado por tipo.',
-    '5. **Por CFOP** — análise dos principais CFOPs: natureza da operação, se é fonte de crédito ou débito e atenção especial a regimes diferenciados.',
-    '6. **Evolução Temporal** — médias mensais de documentos, faturamento e IBS/CBS; tendência e regularidade do período.',
-    '7. **Recomendações** — ações prioritárias (Alta/Média/Baixa) com impacto financeiro estimado e prazo de execução.',
-    '8. **Conclusão** — diagnóstico consolidado e perspectiva fiscal estratégica para os próximos períodos.',
+    '1. **Sumário Executivo** — panorama do período, regime identificado, posição credora/devedora e principal diagnóstico.',
+    '2. **Posição RTC** — tabela com créditos, débitos, saldo e índices percentuais. Interpretação fiscal dos indicadores.',
+    '3. **Análise de Regime e Estratégia Tributária** — seção prioritária adaptada ao regime detectado (ver instrução especial acima). Use tabelas comparativas.',
+    '4. **Conformidade** — qualidade da carteira de fornecedores, risco de créditos perdidos, impacto financeiro.',
+    '5. **Por Tipo de Documento** — tabela com participação de cada espécie e IBS/CBS gerado.',
+    '6. **Por CFOP** — análise dos CFOPs com maior concentração, natureza da operação e atenção a regimes diferenciados.',
+    '7. **Evolução Temporal** — médias mensais, tendência e regularidade do período.',
+    '8. **Recomendações** — ações prioritárias (Alta/Média/Baixa) com impacto financeiro estimado e prazo.',
+    '9. **Conclusão** — diagnóstico consolidado e perspectiva estratégica.',
   ].join('\n')
 
-  return `Atue como contador especialista, tributarista experiente e conhecedor profundo dos impactos da Reforma Tributária do Consumo (RTC) — IBS e CBS instituídos pela LC 214/2025.
+  return `Atue como contador especialista, tributarista experiente e conhecedor profundo da Reforma Tributária do Consumo (RTC) — IBS e CBS instituídos pela LC 214/2025.
 
-Com base exclusivamente nos dados estatísticos a seguir, elabore um DOSSIÊ TÉCNICO TRIBUTÁRIO completo e profissional nas seções abaixo:
+Com base exclusivamente nos dados estatísticos a seguir, elabore um DOSSIÊ TÉCNICO TRIBUTÁRIO profissional nas seções indicadas.
 
+${regimeInstruction}
+
+## SEÇÕES OBRIGATÓRIAS:
 ${secoes}
 
 ---
@@ -104,14 +194,15 @@ ${dados}
 
 ---
 
-INSTRUÇÕES DE FORMATAÇÃO E TOM:
-- Markdown com tabelas (use | col | col |), negrito, listas hierárquicas e subtítulos ## para cada seção
-- Valores monetários em padrão brasileiro: R$ 1.234,56
-- Percentuais com 2 casas decimais
-- Tom técnico e assertivo, adequado para diretores e contadores
-- Não exiba cálculos intermediários nem equações — apresente resultados e interpretações
-- Não cite dados além do fornecido neste prompt`
+INSTRUÇÕES DE FORMATAÇÃO:
+- Use TABELAS Markdown (formato | col | col | col |) para comparativos e indicadores numéricos
+- Negrito, subtítulos ##, listas hierárquicas
+- Valores em R$ com 2 casas decimais (padrão pt-BR: vírgula decimal)
+- Tom técnico e assertivo para diretores e contadores
+- Não exiba cálculos intermediários — apresente resultados e sua interpretação
+- Não cite dados além do fornecido`
 }
+
 
 
 // ---------------------------------------------------------------------------
