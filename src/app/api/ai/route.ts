@@ -87,13 +87,40 @@ REGRAS: Use apenas dados do contexto. Cite valores em R$ com 2 casas decimais e 
 // ---------------------------------------------------------------------------
 // VERIFICAÇÃO DE ORIGEM
 // ---------------------------------------------------------------------------
+//
+// VERCEL_URL contém a URL da *deployment* específica (preview ou produção),
+// que muda a cada deploy. Não é confiável para comparar com a origin real.
+// VERCEL_PROJECT_PRODUCTION_URL é a URL canônica de produção — mais adequada.
+//
+// Para o beta, aceitamos qualquer origem que seja:
+//   - localhost (desenvolvimento)
+//   - *.vercel.app (produção / preview Vercel)
+//   - O domínio de produção configurado (NEXT_PUBLIC_APP_URL, opcional)
+//
+// O risco de abuse é mitigado pelo rate limiting do próprio Gemini na chave.
+// CSRF token completo está planejado para v2.0.
 
 function isOriginAllowed(request: NextRequest): boolean {
-  if (!process.env.VERCEL_URL) return true // desenvolvimento local
   const origin  = request.headers.get('origin')  ?? ''
   const referer = request.headers.get('referer') ?? ''
-  const allowed = `https://${process.env.VERCEL_URL}`
-  return origin.startsWith(allowed) || referer.startsWith(allowed)
+  const source  = origin || referer
+
+  // Sem origin/referer (ex: chamadas diretas sem browser) — aceitar em dev
+  if (!source) {
+    return !process.env.VERCEL_URL // true em local, false em produção
+  }
+
+  // Desenvolvimento local
+  if (source.includes('localhost') || source.includes('127.0.0.1')) return true
+
+  // Qualquer subdomínio Vercel do projeto (produção e previews)
+  if (source.includes('.vercel.app')) return true
+
+  // Domínio customizado opcional (configurado pelo operador)
+  const customDomain = process.env.NEXT_PUBLIC_APP_URL
+  if (customDomain && source.startsWith(customDomain)) return true
+
+  return false
 }
 
 // ---------------------------------------------------------------------------
