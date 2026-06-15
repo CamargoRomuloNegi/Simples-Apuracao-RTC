@@ -8,13 +8,11 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { useRouter }           from 'next/navigation'
 import { LogOut, User }        from 'lucide-react'
 import { createClient }        from '@/lib/supabase/client'
 import { useFiscalStore }      from '@/application/store/useFiscalStore'
 
 export function Header() {
-  const router    = useRouter()
   const documents = useFiscalStore(s => s.documents)
   const [userEmail, setUserEmail] = useState<string | null>(null)
   const [loggingOut, setLoggingOut] = useState(false)
@@ -34,9 +32,13 @@ export function Header() {
     try {
       const supabase = createClient()
       await supabase.auth.signOut()
-      router.push('/login')
-      router.refresh()
+      // window.location.href força navegação HTTP completa (não SPA).
+      // Isso garante que os cookies de sessão já estejam limpos quando
+      // o middleware avaliar a próxima requisição — evita o travamento
+      // que ocorre com router.push() antes da limpeza dos cookies.
+      window.location.href = '/login'
     } catch {
+      // Em caso de erro, restaurar o estado e avisar o usuário
       setLoggingOut(false)
     }
   }
